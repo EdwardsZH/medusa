@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<link href="../node_modules/bootstrap/dist/css/bootstrap.min.css" rel="stylesheet">
+<script>
+  window.jQuery = window.$ = require('jQuery');
+  require('bootstrap');
+
+  const electron = require('electron');
+  const fs = require("fs");
+  const path = require("path");
+
+  $(function() {
+    var whosModalPassword;
+    $('#chooseFile, #chooseFolder').on('change', (event) => {
+      const files = event.target.files;
+      for (var i = 0; i < files.length; i++) {
+          console.log(files[i].path);
+      }
+      whosModalPassword = event.currentTarget.id;
+      $('#modalPassword').modal('show');
+    });
+    $("#history").on('click', () => {
+      whosModalPassword = event.currentTarget.id;
+      $('#modalPassword').modal('show');
+    });
+    $("#settings").on('click', () => {
+      alert('Will open modal to set zip/unzip application path');
+    });
+    $('#close').on('click', () => {
+      electron.remote.getCurrentWindow().close();
+    });
+    $('#decidePassword').on('click', () => {
+      $('#password').val('');
+      if (whosModalPassword == 'history') {
+        $('#modalHistory').modal('show');
+      }
+    });
+    $('.modal').on('shown.bs.modal', () => {
+      $(this).find('input[type="password"]:first')[0].focus();
+    });
+  });
+</script>
+<title>medusa</title>
+</head>
+<body style="padding:2em;">
+  <div class="container-fluid">
+    <div class="row">
+      <div class="pull-left">
+        <label><span class="btn btn-primary">File<input id="chooseFile" type="file" style="display:none"></span></label>
+        <label><span class="btn btn-primary">Folder<input id="chooseFolder" type="file" style="display:none" webkitdirectory directory></span></label>
+      </div>
+      <div class="pull-right">
+        <button id="history" class="btn btn-primary"><span class="glyphicon glyphicon glyphicon-list-alt"></span></button>
+        <button id="settings" class="btn btn-primary"><span class="glyphicon glyphicon-cog"></span></button>
+      </div>
+    </div>
+    <div class="row">&nbsp;</div>
+    <div class="row">
+      <button id="close" class="btn btn-default">Close</button>
+    </div>
+  </div>
+
+  <div id="modalPassword" class="modal fade" tabindex="-1" role="dialog">
+    <div class="modal-dialog" role="document">
+      <div class="modal-content">
+        <div class="modal-body">
+          <table><tr><td><!-- floatだとモーダルからはみ出たのでtableレイアウトにしました -->
+            <div class="input-group">
+              <span class="input-group-addon">password</span>
+              <input id="password" type="password" class="form-control" aria-describedby="basic-addon3">
+            </div>
+          </td><td style="padding-left:1em;">
+            <button id="decidePassword" class="btn btn-primary" data-dismiss="modal">OK</button>
+          </td></tr></table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="modalHistory" class="modal fade" tabindex="-1" role="dialog">
+    <div class="modal-dialog" role="document">
+      <div class="modal-content">
+        <div class="modal-body">
+          <table style="width:100%; margin-bottom: 1em;"><tr><td><!-- floatだとモーダルからはみ出たのでtableレイアウトにしました -->
+            <button id="updateHistory" class="btn btn-danger" data-dismiss="modal">Add Password</button>
+          </td><td class="text-right">
+            <button class="btn btn-warn" data-dismiss="modal">Close</button>
+          </td></tr></table>
+          <table class="table table-bordered">
+            <tr><td>
+              prevPassword2
+            </td></tr>
+            <tr><td>
+              prevPassword1
+          </td></tr></table>
+        </div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>
