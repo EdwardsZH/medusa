@@ -1,17 +1,15 @@
 {
   "name": "medusa",
   "version": "1.0.0",
-  "description": "",
+  "private": true,
   "main": "app/index.js",
+  "scripts": {
+    "start": "electron ."
+  },
   "dependencies": {
     "bootstrap": "^3.3.7",
     "electron": "^1.7.9",
     "jQuery": "^1.7.4"
   },
-  "devDependencies": {},
-  "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
-  },
-  "author": "",
-  "license": "ISC"
+  "devDependencies": {}
 }
