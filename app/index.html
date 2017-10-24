@@ -10,19 +10,21 @@
   const electron = require('electron');
   const fs = require("fs");
   const path = require("path");
+  const child_process = require('child_process');
+  const iconv = require('iconv-lite');
+
+  // Zip/Unzipアプリへのパスはとりあえず決め打ち
+  const zipCommandTemplate = '"C:\\Program Files\\7-Zip\\7z.exe" a -p"${password}" -tzip "${sourcePath}.zip" "${sourcePath}"';
 
   $(function() {
-    var whosModalPassword;
+    var modalStatus;
     $('#chooseFile, #chooseFolder').on('change', (event) => {
-      const files = event.target.files;
-      for (var i = 0; i < files.length; i++) {
-          console.log(files[i].path);
-      }
-      whosModalPassword = event.currentTarget.id;
+      modalStatus = { action: 'zip', sourcePath: event.currentTarget.files[0].path };
+      event.currentTarget.value = ''; // 同じものを再度対象にしたときもchangeイベントが走るようにクリアする
       $('#modalPassword').modal('show');
     });
     $("#history").on('click', () => {
-      whosModalPassword = event.currentTarget.id;
+      modalStatus = { action: 'history' };
       $('#modalPassword').modal('show');
     });
     $("#settings").on('click', () => {
@@ -31,9 +33,26 @@
     $('#close').on('click', () => {
       electron.remote.getCurrentWindow().close();
     });
+
+    // modals
+    $('#password').on('keypress', (event) => {
+      if (event.keyCode === 13) $('#decidePassword').click();
+    });
     $('#decidePassword').on('click', () => {
-      $('#password').val('');
-      if (whosModalPassword == 'history') {
+      const password = $('#password').val();
+      $('#password').val(''); // 入力されたパスワードはすぐにクリアして内部保持しないようにする
+      if (modalStatus.action === 'zip') {
+        const zipCommand = zipCommandTemplate
+          .replace(/\$\{password\}/g, password)
+          .replace(/\$\{sourcePath\}/g, modalStatus.sourcePath);
+        child_process.exec(zipCommand, {encoding: 'buffer'}, (e, stdout, stderr) => {
+          if (e) {
+            alert(iconv.decode(stderr, 'Shift_JIS')); // stderrのencodingをbufferにしておき、Shift_JISに変換してから表示する
+            return;
+          }
+          alert('complete');
+        });
+      } else if (modalStatus.action === 'history') {
         $('#modalHistory').modal('show');
       }
     });
