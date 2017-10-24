@@ -1,0 +1,2 @@
+zipCommandTemplate: '"C:\\Program Files\\7-Zip\\7z.exe" a -p"${password}" -tzip "${sourcePath}.zip" "${sourcePath}"'
+passwordHistory: ''

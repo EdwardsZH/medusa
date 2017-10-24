@@ -12,9 +12,9 @@
   const path = require("path");
   const child_process = require('child_process');
   const iconv = require('iconv-lite');
+  const yaml = require('js-yaml');
 
-  // Zip/Unzipアプリへのパスはとりあえず決め打ち
-  const zipCommandTemplate = '"C:\\Program Files\\7-Zip\\7z.exe" a -p"${password}" -tzip "${sourcePath}.zip" "${sourcePath}"';
+  const config = yaml.safeLoad(fs.readFileSync('medusa.yml', 'utf8'));
 
   $(function() {
     var modalStatus;
@@ -42,7 +42,7 @@
       const password = $('#password').val();
       $('#password').val(''); // 入力されたパスワードはすぐにクリアして内部保持しないようにする
       if (modalStatus.action === 'zip') {
-        const zipCommand = zipCommandTemplate
+        const zipCommand = config.zipCommandTemplate
           .replace(/\$\{password\}/g, password)
           .replace(/\$\{sourcePath\}/g, modalStatus.sourcePath);
         child_process.exec(zipCommand, {encoding: 'buffer'}, (e, stdout, stderr) => {
