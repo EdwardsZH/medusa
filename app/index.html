@@ -4,20 +4,25 @@
 <meta charset="UTF-8">
 <link href="../node_modules/bootstrap/dist/css/bootstrap.min.css" rel="stylesheet">
 <script>
-  window.jQuery = window.$ = require('jQuery');
-  require('bootstrap');
-
+  // Node.jsライブラリをインポートする
   const electron = require('electron');
   const fs = require("fs");
   const path = require("path");
   const child_process = require('child_process');
+
+  // サードパーティライブラリをインポートする
+  window.jQuery = window.$ = require('jQuery');
+  require('bootstrap');
   const iconv = require('iconv-lite');
   const yaml = require('js-yaml');
 
   const config = yaml.safeLoad(fs.readFileSync('medusa.yml', 'utf8'));
 
   $(function() {
+    // イベントリスナ間の受け渡しオブジェクト
     var modalStatus;
+
+    // イベントリスナを登録する
     $('#chooseFile, #chooseFolder').on('change', (event) => {
       modalStatus = { action: 'zip', sourcePath: event.currentTarget.files[0].path };
       event.currentTarget.value = ''; // 同じものを再度対象にしたときもchangeイベントが走るようにクリアする
@@ -34,7 +39,7 @@
       electron.remote.getCurrentWindow().close();
     });
 
-    // modals
+    // modal系イベントリスナを登録する
     $('#password').on('keypress', (event) => {
       if (event.keyCode === 13) $('#decidePassword').click();
     });
@@ -85,7 +90,7 @@
     <div class="modal-dialog" role="document">
       <div class="modal-content">
         <div class="modal-body">
-          <table><tr><td><!-- floatだとモーダルからはみ出たのでtableレイアウトにしました -->
+          <table><tr><td><!-- floatだとモーダルからはみ出たのでtableレイアウトにする -->
             <div class="input-group">
               <span class="input-group-addon">password</span>
               <input id="password" type="password" class="form-control" aria-describedby="basic-addon3">
@@ -102,7 +107,7 @@
     <div class="modal-dialog" role="document">
       <div class="modal-content">
         <div class="modal-body">
-          <table style="width:100%; margin-bottom: 1em;"><tr><td><!-- floatだとモーダルからはみ出たのでtableレイアウトにしました -->
+          <table style="width:100%; margin-bottom: 1em;"><tr><td><!-- floatだとモーダルからはみ出たのでtableレイアウトにする -->
             <button id="updateHistory" class="btn btn-danger" data-dismiss="modal">Add Password</button>
           </td><td class="text-right">
             <button class="btn btn-warn" data-dismiss="modal">Close</button>
