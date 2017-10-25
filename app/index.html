@@ -9,6 +9,7 @@
   const fs = require("fs");
   const path = require("path");
   const child_process = require('child_process');
+  const crypto = require('crypto');
 
   // サードパーティライブラリをインポートする
   window.jQuery = window.$ = require('jQuery');
@@ -28,11 +29,11 @@
       event.currentTarget.value = ''; // 同じものを再度対象にしたときもchangeイベントが走るようにクリアする
       $('#modalPassword').modal('show');
     });
-    $("#history").on('click', () => {
+    $("#openHistory").on('click', () => {
       modalStatus = { action: 'history' };
       $('#modalPassword').modal('show');
     });
-    $("#settings").on('click', () => {
+    $("#openSettings").on('click', () => {
       alert('Will open modal to set zip/unzip application path');
     });
     $('#close').on('click', () => {
@@ -40,12 +41,24 @@
     });
 
     // modal系イベントリスナを登録する
+    $('.modal').on('shown.bs.modal', () => {
+      $(this).find('input[type="password"]').first().focus();
+    });
     $('#password').on('keypress', (event) => {
       if (event.keyCode === 13) $('#decidePassword').click();
+    }).on('keyup', () => {
+      const password = $('#password').val(); // thisでは取れないので検索し直す
+      if (toHash(password) === config.passwordHistory[0]) {
+        // 最新のパスワードと一致した場合は色で知らせる
+        $('#passwordInputGroup').addClass('has-success');
+      } else {
+        $('#passwordInputGroup').removeClass('has-success');
+      }
     });
     $('#decidePassword').on('click', () => {
       const password = $('#password').val();
       $('#password').val(''); // 入力されたパスワードはすぐにクリアして内部保持しないようにする
+      $('#passwordInputGroup').removeClass('has-success'); // パスワード一致の色も消しておく
       if (modalStatus.action === 'zip') {
         const zipCommand = config.zipCommandTemplate
           .replace(/\$\{password\}/g, password)
@@ -61,10 +74,33 @@
         $('#modalHistory').modal('show');
       }
     });
-    $('.modal').on('shown.bs.modal', () => {
-      $(this).find('input[type="password"]:first')[0].focus();
+    $('#openPassword').on('click', () => {
+      $('#modalNewPassword').modal('show');
+    });
+    $('#newPassword, #newPassword2').on('keyup', () => {
+      const newPassword = $('#newPassword').val();
+      if (newPassword) {
+        if ($('#newPassword2').val() === newPassword) {
+          // パスワードが一致すればボタンを押せるようにする
+          $('#decideNewPassword').prop('disabled', false).addClass('btn-success');
+          return;
+        }
+      }
+      $('#decideNewPassword').prop('disabled', true).removeClass('btn-success');
+    });
+    $('#decideNewPassword').on('click', () => {
+      const newPassword = $('#newPassword').val();
+      $('#newPassword, #newPassword2').val(''); // 入力されたパスワードはすぐにクリアして内部保持しないようにする
+      config.passwordHistory.unshift(toHash(newPassword));
+      fs.writeFileSync('medusa.yml', yaml.safeDump(config, { flowLevel: 2 }), 'utf8');
     });
   });
+
+  function toHash(target) {
+    const sha512 = crypto.createHash('sha512');
+    sha512.update(target);
+    return sha512.digest('hex');
+  }
 </script>
 <title>medusa</title>
 </head>
@@ -76,8 +112,8 @@
         <label><span class="btn btn-primary">Folder<input id="chooseFolder" type="file" style="display:none" webkitdirectory directory></span></label>
       </div>
       <div class="pull-right">
-        <button id="history" class="btn btn-primary"><span class="glyphicon glyphicon glyphicon-list-alt"></span></button>
-        <button id="settings" class="btn btn-primary"><span class="glyphicon glyphicon-cog"></span></button>
+        <button id="openHistory" class="btn btn-primary"><span class="glyphicon glyphicon glyphicon-list-alt"></span></button>
+        <button id="openSettings" class="btn btn-primary"><span class="glyphicon glyphicon-cog"></span></button>
       </div>
     </div>
     <div class="row">&nbsp;</div>
@@ -91,7 +127,7 @@
       <div class="modal-content">
         <div class="modal-body">
           <table><tr><td><!-- floatだとモーダルからはみ出たのでtableレイアウトにする -->
-            <div class="input-group">
+            <div id="passwordInputGroup" class="input-group">
               <span class="input-group-addon">password</span>
               <input id="password" type="password" class="form-control" aria-describedby="basic-addon3">
             </div>
@@ -107,8 +143,8 @@
     <div class="modal-dialog" role="document">
       <div class="modal-content">
         <div class="modal-body">
-          <table style="width:100%; margin-bottom: 1em;"><tr><td><!-- floatだとモーダルからはみ出たのでtableレイアウトにする -->
-            <button id="updateHistory" class="btn btn-danger" data-dismiss="modal">Add Password</button>
+          <table style="width:100%; margin-bottom:1em;"><tr><td><!-- floatだとモーダルからはみ出たのでtableレイアウトにする -->
+            <button id="openPassword" class="btn btn-danger" data-dismiss="modal">New password</button>
           </td><td class="text-right">
             <button class="btn btn-warn" data-dismiss="modal">Close</button>
           </td></tr></table>
@@ -118,6 +154,27 @@
             </td></tr>
             <tr><td>
               prevPassword1
+          </td></tr></table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="modalNewPassword" class="modal fade" tabindex="-1" role="dialog">
+    <div class="modal-dialog" role="document">
+      <div class="modal-content">
+        <div class="modal-body">
+          <table><tr><td><!-- floatだとモーダルからはみ出たのでtableレイアウトにする -->
+            <div class="input-group">
+              <span class="input-group-addon">password&nbsp;&nbsp;　　　&nbsp;</span>
+              <input id="newPassword" type="password" class="form-control" aria-describedby="basic-addon3"><br>
+            </div>
+            <div class="input-group" style="margin-top:1em;">
+              <span class="input-group-addon">password (確認用)</span>
+              <input id="newPassword2" type="password" class="form-control" aria-describedby="basic-addon3"><br>
+            </div>
+          </td><td style="padding-left:1em;vertical-align:bottom;">
+            <button id="decideNewPassword" class="btn" disabled="disabled" data-dismiss="modal">Add</button>
           </td></tr></table>
         </div>
       </div>
