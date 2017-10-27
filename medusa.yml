@@ -1,3 +1,5 @@
-passwordHistory:
-  # 「a」をハッシュ化したもの
-  - 1f40fc92da241694750979ee6cf582f2d5d7d28e18335de05abc54d0560e0f5302860c652bf08d560252aa5e74210546f369fbbbce8c12cfc7957b2652fe9a75
+# 最新のパスワードは「c」
+latestHash: 2e7d2c03a9507ae265ecf5b5356885a53393a2029d241394997265a1a25aefc6
+cryptedHistory:
+  - 9d73de203d6358ac8d5e0b0eea729e0f
+  - 2da1ad07fa67ea0f8c0891b3ecac354b

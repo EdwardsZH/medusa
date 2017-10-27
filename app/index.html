@@ -21,7 +21,7 @@
   const config = yaml.safeLoad(fs.readFileSync('medusa.yml', 'utf8'));
 
   $(function() {
-    // イベントリスナ間の受け渡しオブジェクト
+    // イベントリスナ間の受け渡しオブジェクト (TODO:modal要素に持たせて閉じたらクリアするように変更する)
     var modalStatus;
 
     // イベントリスナを登録する
@@ -43,13 +43,15 @@
 
     // modal系イベントリスナを登録する
     $('.modal').on('shown.bs.modal', () => {
-      $(this).find('input[type="password"]').first().focus();
+      $(this).find('input[type="password"]').first().focus(); // modal要素が開いたらパスワードにフォーカス
+    }).on('hidden.bs.modal', () => {
+      $(this).find('input[type="password"]').val(''); // modal要素が閉じたらパスワードをクリア
     });
     $('#password').on('keypress', (event) => {
       if (event.keyCode === 13) $('#decidePassword').click();
     }).on('keyup', () => {
       const password = $('#password').val(); // thisでは取れないので検索し直す
-      if (toHash(password) === config.passwordHistory[0]) {
+      if (toHash(password) === config.latestHash) {
         // 最新のパスワードと一致した場合は色で知らせる
         $('#passwordInputGroup').addClass('has-success');
       } else {
@@ -58,7 +60,6 @@
     });
     $('#decidePassword').on('click', () => {
       const password = $('#password').val();
-      $('#password').val(''); // 入力されたパスワードはすぐにクリアして内部保持しないようにする
       $('#passwordInputGroup').removeClass('has-success'); // パスワード一致の色も消しておく
       if (modalStatus.action === 'zip') {
         const _7zArgs = ['a', '-tzip', '-p' + password, modalStatus.sourcePath + '.zip', modalStatus.sourcePath];
@@ -70,10 +71,15 @@
           alert('complete');
         });
       } else if (modalStatus.action === 'history') {
+        const table = $('#passwordHistory').empty();
+        const decryptedHistory = config.cryptedHistory.map((val) => decrypt(val, password));
+        decryptedHistory.unshift(password); // 複合履歴に前回パスワードも含めてしまう
+        decryptedHistory.forEach((val) => table.append($('<tr>').append($('<td>').text(val))));
+        modalStatus = { decryptedHistory: decryptedHistory };
         $('#modalHistory').modal('show');
       }
     });
-    $('#openPassword').on('click', () => {
+    $('#openNewPassword').on('click', () => {
       $('#modalNewPassword').modal('show');
     });
     $('#newPassword, #newPassword2').on('keyup', () => {
@@ -89,16 +95,26 @@
     });
     $('#decideNewPassword').on('click', () => {
       const newPassword = $('#newPassword').val();
-      $('#newPassword, #newPassword2').val(''); // 入力されたパスワードはすぐにクリアして内部保持しないようにする
-      config.passwordHistory.unshift(toHash(newPassword));
+      config.latestHash = toHash(newPassword); // 新しいパスワードのハッシュを作る
+      config.cryptedHistory = modalStatus.decryptedHistory.map((val) => crypt(val, newPassword)); // 新しいパスワードで再暗号化する
       fs.writeFileSync('medusa.yml', yaml.safeDump(config, { flowLevel: 2 }), 'utf8');
     });
   });
 
-  function toHash(target) {
-    const sha512 = crypto.createHash('sha512');
-    sha512.update(target);
-    return sha512.digest('hex');
+  function crypt(text, password) {
+    const cipher = crypto.createCipher('aes256', password + '__SALT__');
+    cipher.update(text, 'utf8', 'hex');
+    return cipher.final('hex');
+  }
+  function decrypt(text, password) {
+    const decipher = crypto.createDecipher('aes256', password + '__SALT__');
+    decipher.update(text, 'hex', 'utf8');
+    return decipher.final('utf8');
+  }
+  function toHash(text) {
+    const hash = crypto.createHash('sha256');
+    hash.update(text, 'utf8');
+    return hash.digest('hex');
   }
 </script>
 <title>medusa</title>
@@ -140,20 +156,14 @@
 
   <div id="modalHistory" class="modal fade" tabindex="-1" role="dialog">
     <div class="modal-dialog" role="document">
-      <div class="modal-content">
+      <div class="modal-content" style="max-height:140px;overflow-y:scroll;">
         <div class="modal-body">
           <table style="width:100%; margin-bottom:1em;"><tr><td><!-- floatだとモーダルからはみ出たのでtableレイアウトにする -->
-            <button id="openPassword" class="btn btn-danger" data-dismiss="modal">New password</button>
+            <button id="openNewPassword" class="btn btn-danger" data-dismiss="modal">New password</button>
           </td><td class="text-right">
             <button class="btn btn-warn" data-dismiss="modal">Close</button>
           </td></tr></table>
-          <table class="table table-bordered">
-            <tr><td>
-              prevPassword2
-            </td></tr>
-            <tr><td>
-              prevPassword1
-          </td></tr></table>
+          <table id="passwordHistory" class="table table-bordered"></table>
         </div>
       </div>
     </div>
