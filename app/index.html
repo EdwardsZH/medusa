@@ -16,6 +16,7 @@
   require('bootstrap');
   const iconv = require('iconv-lite');
   const yaml = require('js-yaml');
+  const _7z = require('7zip')['7z'];
 
   const config = yaml.safeLoad(fs.readFileSync('medusa.yml', 'utf8'));
 
@@ -60,10 +61,8 @@
       $('#password').val(''); // 入力されたパスワードはすぐにクリアして内部保持しないようにする
       $('#passwordInputGroup').removeClass('has-success'); // パスワード一致の色も消しておく
       if (modalStatus.action === 'zip') {
-        const zipCommand = config.zipCommandTemplate
-          .replace(/\$\{password\}/g, password)
-          .replace(/\$\{sourcePath\}/g, modalStatus.sourcePath);
-        child_process.exec(zipCommand, {encoding: 'buffer'}, (e, stdout, stderr) => {
+        const _7zArgs = ['a', '-tzip', '-p' + password, modalStatus.sourcePath + '.zip', modalStatus.sourcePath];
+        child_process.execFile(_7z, _7zArgs, {encoding: 'buffer'}, (e, stdout, stderr) => {
           if (e) {
             alert(iconv.decode(stderr, 'Shift_JIS')); // stderrのencodingをbufferにしておき、Shift_JISに変換してから表示する
             return;
