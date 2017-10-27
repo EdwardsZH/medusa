@@ -48,7 +48,7 @@
       $(this).find('input[type="password"]').val(''); // modal要素が閉じたらパスワードをクリア
     });
     $('#password').on('keypress', (event) => {
-      if (event.keyCode === 13) $('#decidePassword').click();
+      if (event.keyCode === 13) $('#enterPassword').click();
     }).on('keyup', () => {
       const password = $('#password').val(); // thisでは取れないので検索し直す
       if (toHash(password) === config.latestHash) {
@@ -58,7 +58,7 @@
         $('#passwordInputGroup').removeClass('has-success');
       }
     });
-    $('#decidePassword').on('click', () => {
+    $('#enterPassword').on('click', () => {
       const password = $('#password').val();
       $('#passwordInputGroup').removeClass('has-success'); // パスワード一致の色も消しておく
       if (modalStatus.action === 'zip') {
@@ -87,13 +87,13 @@
       if (newPassword) {
         if ($('#newPassword2').val() === newPassword) {
           // パスワードが一致すればボタンを押せるようにする
-          $('#decideNewPassword').prop('disabled', false).addClass('btn-success');
+          $('#addNewPassword').prop('disabled', false).addClass('btn-success');
           return;
         }
       }
-      $('#decideNewPassword').prop('disabled', true).removeClass('btn-success');
+      $('#addNewPassword').prop('disabled', true).removeClass('btn-success');
     });
-    $('#decideNewPassword').on('click', () => {
+    $('#addNewPassword').on('click', () => {
       const newPassword = $('#newPassword').val();
       config.latestHash = toHash(newPassword); // 新しいパスワードのハッシュを作る
       config.cryptedHistory = modalStatus.decryptedHistory.map((val) => crypt(val, newPassword)); // 新しいパスワードで再暗号化する
@@ -147,7 +147,7 @@
               <input id="password" type="password" class="form-control" aria-describedby="basic-addon3">
             </div>
           </td><td style="padding-left:1em;">
-            <button id="decidePassword" class="btn btn-primary" data-dismiss="modal">OK</button>
+            <button id="enterPassword" class="btn btn-primary" data-dismiss="modal">OK</button>
           </td></tr></table>
         </div>
       </div>
@@ -183,7 +183,7 @@
               <input id="newPassword2" type="password" class="form-control" aria-describedby="basic-addon3"><br>
             </div>
           </td><td style="padding-left:1em;vertical-align:bottom;">
-            <button id="decideNewPassword" class="btn" disabled="disabled" data-dismiss="modal">Add</button>
+            <button id="addNewPassword" class="btn" disabled="disabled" data-dismiss="modal">Add</button>
           </td></tr></table>
         </div>
       </div>
