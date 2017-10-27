@@ -17,6 +17,7 @@
   const iconv = require('iconv-lite');
   const yaml = require('js-yaml');
   const _7z = require('7zip')['7z'];
+  const del = require('del');
 
   const config = yaml.safeLoad(fs.readFileSync('medusa.yml', 'utf8'));
 
@@ -61,15 +62,35 @@
     $('#enterPassword').on('click', () => {
       const password = $('#password').val();
       $('#passwordInputGroup').removeClass('has-success'); // パスワード一致の色も消しておく
-      if (modalStatus.action === 'zip') {
-        const _7zArgs = ['a', '-tzip', '-p' + password, modalStatus.sourcePath + '.zip', modalStatus.sourcePath];
-        child_process.execFile(_7z, _7zArgs, {encoding: 'buffer'}, (e, stdout, stderr) => {
-          if (e) {
-            alert(iconv.decode(stderr, 'Shift_JIS')); // stderrのencodingをbufferにしておき、Shift_JISに変換してから表示する
-            return;
-          }
-          alert('complete');
-        });
+      if (modalStatus.action === 'zip' ) {
+        if (/(.+)\.zip/.test(modalStatus.sourcePath)) {
+          const decryptedHistory = config.cryptedHistory.map((val) => decrypt(val, password));
+          decryptedHistory.unshift(password); // 複合履歴に前回パスワードも含めて、その履歴で解凍にトライする
+          (function unzip(i) {
+            const _7zArgs = ['x', '-tzip', '-p' + decryptedHistory[i], '-odest', modalStatus.sourcePath];
+            child_process.execFile(_7z, _7zArgs, {encoding: 'buffer'}, (e, stdout, stderr) => {
+              if (e) {
+                if (e.message.includes('Wrong password') && i + 1 < decryptedHistory.length) {
+                  try { del.sync('dest'); } catch (delError) { alert(delError); } // 中途半端に作ったフォルダを消してリトライ
+                  unzip(i + 1);
+                  return;
+                }
+                alert(iconv.decode(stderr, 'Shift_JIS')); // stderrのencodingをbufferにしておき、Shift_JISに変換してから表示する
+                return;
+              }
+              alert(process.cwd() + '\\dest 配下に解凍しました'); // TODO:解凍先を選ぶか
+            });
+          })(0);
+        } else {
+          const _7zArgs = ['a', '-tzip', '-p' + password, modalStatus.sourcePath + '.zip', modalStatus.sourcePath];
+          child_process.execFile(_7z, _7zArgs, {encoding: 'buffer'}, (e, stdout, stderr) => {
+            if (e) {
+              alert(iconv.decode(stderr, 'Shift_JIS')); // stderrのencodingをbufferにしておき、Shift_JISに変換してから表示する
+              return;
+            }
+            alert('complete');
+          });
+        }
       } else if (modalStatus.action === 'history') {
         const table = $('#passwordHistory').empty();
         const decryptedHistory = config.cryptedHistory.map((val) => decrypt(val, password));
