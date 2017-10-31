@@ -4,6 +4,10 @@
 <meta charset="UTF-8">
 <link href="../node_modules/bootstrap/dist/css/bootstrap.min.css" rel="stylesheet">
 <script>
+  window.onerror = function(e) {
+    alert(e);
+  };
+
   // Node.jsライブラリをインポートする
   const electron = require('electron');
   const fs = require("fs");
@@ -17,7 +21,6 @@
   const iconv = require('iconv-lite');
   const yaml = require('js-yaml');
   const _7z = require('7zip')['7z'];
-  const del = require('del');
 
   const config = yaml.safeLoad(fs.readFileSync('medusa.yml', 'utf8'));
 
@@ -27,7 +30,7 @@
 
     // イベントリスナを登録する
     $('#chooseFile, #chooseFolder').on('change', (event) => {
-      modalStatus = { action: 'zip', sourcePath: event.currentTarget.files[0].path };
+      modalStatus = { action: 'zip', srcFilePath: event.currentTarget.files[0].path };
       event.currentTarget.value = ''; // 同じものを再度対象にしたときもchangeイベントが走るようにクリアする
       $('#modalPassword').modal('show');
     });
@@ -47,6 +50,7 @@
       $(this).find('input[type="password"]').first().focus(); // modal要素が開いたらパスワードにフォーカス
     }).on('hidden.bs.modal', () => {
       $(this).find('input[type="password"]').val(''); // modal要素が閉じたらパスワードをクリア
+      $('#passwordInputGroup').removeClass('has-success'); // パスワード一致の色も消しておく
     });
     $('#password').on('keypress', (event) => {
       if (event.keyCode === 13) $('#enterPassword').click();
@@ -61,42 +65,17 @@
     });
     $('#enterPassword').on('click', () => {
       const password = $('#password').val();
-      $('#passwordInputGroup').removeClass('has-success'); // パスワード一致の色も消しておく
-      if (modalStatus.action === 'zip' ) {
-        if (/(.+)\.zip/.test(modalStatus.sourcePath)) {
-          const decryptedHistory = config.cryptedHistory.map((val) => decrypt(val, password));
-          decryptedHistory.unshift(password); // 複合履歴に前回パスワードも含めて、その履歴で解凍にトライする
-          (function unzip(i) {
-            const _7zArgs = ['x', '-tzip', '-p' + decryptedHistory[i], '-odest', modalStatus.sourcePath];
-            child_process.execFile(_7z, _7zArgs, {encoding: 'buffer'}, (e, stdout, stderr) => {
-              if (e) {
-                if (e.message.includes('Wrong password') && i + 1 < decryptedHistory.length) {
-                  try { del.sync('dest'); } catch (delError) { alert(delError); } // 中途半端に作ったフォルダを消してリトライ
-                  unzip(i + 1);
-                  return;
-                }
-                alert(iconv.decode(stderr, 'Shift_JIS')); // stderrのencodingをbufferにしておき、Shift_JISに変換してから表示する
-                return;
-              }
-              alert(process.cwd() + '\\dest 配下に解凍しました'); // TODO:解凍先を選ぶか
-            });
-          })(0);
+      if (modalStatus.action === 'zip') {
+        if (/(.+)\.zip/.test(modalStatus.srcFilePath)) {
+          unzip(modalStatus.srcFilePath, decryptHistory(config.cryptedHistory, password));
         } else {
-          const _7zArgs = ['a', '-tzip', '-p' + password, modalStatus.sourcePath + '.zip', modalStatus.sourcePath];
-          child_process.execFile(_7z, _7zArgs, {encoding: 'buffer'}, (e, stdout, stderr) => {
-            if (e) {
-              alert(iconv.decode(stderr, 'Shift_JIS')); // stderrのencodingをbufferにしておき、Shift_JISに変換してから表示する
-              return;
-            }
-            alert('complete');
-          });
+          zip(modalStatus.srcFilePath);
         }
       } else if (modalStatus.action === 'history') {
-        const table = $('#passwordHistory').empty();
-        const decryptedHistory = config.cryptedHistory.map((val) => decrypt(val, password));
-        decryptedHistory.unshift(password); // 複合履歴に前回パスワードも含めてしまう
-        decryptedHistory.forEach((val) => table.append($('<tr>').append($('<td>').text(val))));
-        modalStatus = { decryptedHistory: decryptedHistory };
+        const table = $('#passwordHistory').empty(); // TODO:履歴モーダルを閉じた時点で消しておきたい情報
+        const passwordHistory = decryptHistory(config.cryptedHistory, password);
+        passwordHistory.forEach((val) => table.append($('<tr>').append($('<td>').text(val))));
+        modalStatus = { passwordHistory: passwordHistory };
         $('#modalHistory').modal('show');
       }
     });
@@ -117,25 +96,60 @@
     $('#addNewPassword').on('click', () => {
       const newPassword = $('#newPassword').val();
       config.latestHash = toHash(newPassword); // 新しいパスワードのハッシュを作る
-      config.cryptedHistory = modalStatus.decryptedHistory.map((val) => crypt(val, newPassword)); // 新しいパスワードで再暗号化する
+      config.cryptedHistory = cryptHistory(modalStatus.passwordHistory, newPassword); // 新しいパスワードで再暗号化する
       fs.writeFileSync('medusa.yml', yaml.safeDump(config, { flowLevel: 2 }), 'utf8');
     });
   });
 
-  function crypt(text, password) {
-    const cipher = crypto.createCipher('aes256', password + '__SALT__');
-    cipher.update(text, 'utf8', 'hex');
-    return cipher.final('hex');
+  function cryptHistory(passwordHistory, newPassword) {
+    const crypt = function(text, password) {
+      const cipher = crypto.createCipher('aes256', password + '__SALT__');
+      cipher.update(text, 'utf8', 'hex');
+      return cipher.final('hex');
+    };
+    return passwordHistory.map((val) => crypt(val, newPassword));
   }
-  function decrypt(text, password) {
-    const decipher = crypto.createDecipher('aes256', password + '__SALT__');
-    decipher.update(text, 'hex', 'utf8');
-    return decipher.final('utf8');
+  function decryptHistory(cryptedHistory, password) {
+    const decrypt = function(text, password) {
+      const decipher = crypto.createDecipher('aes256', password + '__SALT__');
+      decipher.update(text, 'hex', 'utf8');
+      return decipher.final('utf8');
+    };
+    const passwordHistory = cryptedHistory.map((val) => decrypt(val, password));
+    passwordHistory.unshift(password); // 最新パスワードも含める
+    return passwordHistory;
   }
   function toHash(text) {
     const hash = crypto.createHash('sha256');
     hash.update(text, 'utf8');
     return hash.digest('hex');
+  }
+  function unzip(srcFilePath, passwordHistory) {
+    (function recursive(i) {
+      const destFileName = 'dest';
+      const _7zArgs = ['x', '-tzip', '-y', '-aoa',  '-p' + passwordHistory[i], '-o' + destFileName, srcFilePath];
+      child_process.execFile(_7z, _7zArgs, {encoding: 'buffer'}, (e, stdout, stderr) => {
+        if (e) {
+          if (e.message.includes('Wrong password') && i + 1 < passwordHistory.length) {
+            recursive(i + 1);
+            return;
+          }
+          alert(iconv.decode(stderr, 'Shift_JIS')); // stderrのencodingをbufferにしておき、Shift_JISに変換してから表示する
+          return;
+        }
+        alert(process.cwd() + '\\' + destFileName + ' 配下に解凍しました'); // TODO:解凍先を選ぶか
+      });
+    })(0);
+  }
+  function zip(srcFilePath, password) {
+    const _7zArgs = ['a', '-tzip', '-y', '-aoa', '-p' + password, srcFilePath + '.zip', srcFilePath];
+    child_process.execFile(_7z, _7zArgs, {encoding: 'buffer'}, (e, stdout, stderr) => {
+      if (e) {
+        alert(iconv.decode(stderr, 'Shift_JIS')); // stderrのencodingをbufferにしておき、Shift_JISに変換してから表示する
+        return;
+      }
+      alert('complete');
+    });
   }
 </script>
 <title>medusa</title>
@@ -148,8 +162,8 @@
         <label><span class="btn btn-primary">Folder<input id="chooseFolder" type="file" style="display:none" webkitdirectory directory></span></label>
       </div>
       <div class="pull-right">
-        <button id="openHistory" class="btn btn-primary"><span class="glyphicon glyphicon glyphicon-list-alt"></span></button>
-        <button id="openSettings" class="btn btn-primary"><span class="glyphicon glyphicon-cog"></span></button>
+        <!-- 描画後にボタンの幅がピクピク調整されてしまう問題を防ぐためにwidthを明示的に指定しておく -->
+        <button id="openHistory" class="btn btn-primary text-center" style="width:3em;"><span class="glyphicon glyphicon-list-alt"></span></button>
       </div>
     </div>
     <div class="row">&nbsp;</div>
