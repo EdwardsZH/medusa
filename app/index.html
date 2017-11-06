@@ -5,7 +5,12 @@
 <link href="../node_modules/bootstrap/dist/css/bootstrap.min.css" rel="stylesheet">
 <script>
   window.onerror = function(e) {
-    alert(e);
+    alert(typeof(e));
+    if (String(e).includes('EVP_DecryptFinal_ex:bad decrypt')) {
+      alert('パスワードが違います');
+    } else {
+      alert('システムエラーが発生しました。\r\n管理者に問い合わせてください。\r\n\r\n' + e);
+    }
   };
 
   // Node.jsライブラリをインポートする
@@ -23,6 +28,7 @@
   const _7z = require('7zip')['7z'];
 
   const config = yaml.safeLoad(fs.readFileSync('medusa.yml', 'utf8'));
+  var _7zProcess;
 
   $(function() {
     // イベントリスナ間の受け渡しオブジェクト (TODO:modal要素に持たせて閉じたらクリアするように変更する)
@@ -67,7 +73,8 @@
       const password = $('#password').val();
       if (modalStatus.action === 'zip') {
         if (/(.+)\.zip/.test(modalStatus.srcFilePath)) {
-          unzip(modalStatus.srcFilePath, decryptHistory(config.cryptedHistory, password));
+          const destFilePath = RegExp.$1;
+          unzip(modalStatus.srcFilePath, destFilePath, decryptHistory(config.cryptedHistory, password));
         } else {
           zip(modalStatus.srcFilePath);
         }
@@ -99,6 +106,15 @@
       config.cryptedHistory = cryptHistory(modalStatus.passwordHistory, newPassword); // 新しいパスワードで再暗号化する
       fs.writeFileSync('medusa.yml', yaml.safeDump(config, { flowLevel: 2 }), 'utf8');
     });
+    $('#overwriteAll').on('click', () => {
+      _7zProcess.myStdinMessage = 'a\r\n';
+    });
+    $('#renameAll').on('click', () => {
+      _7zProcess.myStdinMessage = 'u\r\n';
+    });
+    $('#modalOverwriteConfirm').on('hidden.bs.modal', () => {
+      _7zProcess.stdin.write(_7zProcess.myStdinMessage || 'q\r\n');
+    });
   });
 
   function cryptHistory(passwordHistory, newPassword) {
@@ -124,23 +140,6 @@
     hash.update(text, 'utf8');
     return hash.digest('hex');
   }
-  function unzip(srcFilePath, passwordHistory) {
-    (function recursive(i) {
-      const destFileName = 'dest';
-      const _7zArgs = ['x', '-tzip', '-y', '-aoa',  '-p' + passwordHistory[i], '-o' + destFileName, srcFilePath];
-      child_process.execFile(_7z, _7zArgs, {encoding: 'buffer'}, (e, stdout, stderr) => {
-        if (e) {
-          if (e.message.includes('Wrong password') && i + 1 < passwordHistory.length) {
-            recursive(i + 1);
-            return;
-          }
-          alert(iconv.decode(stderr, 'Shift_JIS')); // stderrのencodingをbufferにしておき、Shift_JISに変換してから表示する
-          return;
-        }
-        alert(process.cwd() + '\\' + destFileName + ' 配下に解凍しました'); // TODO:解凍先を選ぶか
-      });
-    })(0);
-  }
   function zip(srcFilePath, password) {
     const _7zArgs = ['a', '-tzip', '-y', '-aoa', '-p' + password, srcFilePath + '.zip', srcFilePath];
     child_process.execFile(_7z, _7zArgs, {encoding: 'buffer'}, (e, stdout, stderr) => {
@@ -150,6 +149,46 @@
       }
       alert('complete');
     });
+  }
+  function unzip(srcFilePath, destFilePath, passwordHistory) {
+    (function unzipRecursively(i) {
+      const destFileName = 'dest';
+      const _7zArgs = ['x', '-tzip', '-p' + passwordHistory[i], '-o' + destFilePath, srcFilePath];
+      try {
+        _7zProcess = child_process.spawn(_7z, _7zArgs);
+      } catch (e) {
+        alert('7z:' + e);
+      }
+      _7zProcess.myClosingMessage = 'complete!';
+      _7zProcess.stdout.on('data', (data) => {
+        const text = iconv.decode(data, 'Shift_JIS');
+        if (text.includes('Would you like to replace the existing file')) {
+          if (i > 0) {
+            _7zProcess.stdin.write('a\r\n');
+          } else {
+            $('#destFilePath').text(destFilePath);
+            $('#modalOverwriteConfirm').modal('show');
+          }
+        }
+      });
+      _7zProcess.stderr.on('data', (data) => {
+        const text = iconv.decode(data, 'Shift_JIS');
+        if (text.includes('Wrong password') && i + 1 < passwordHistory.length) {
+          unzipRecursively(i + 1);
+          return;
+        }
+        if (text.includes('Break signaled')) {
+          _7zProcess.myClosingMessage = ''; // キャンセル時は無言で終了する
+          return;
+        }
+        _7zProcess.myClosingMessage = 'zipコマンドに失敗しました。\r\n管理者に問い合わせてください。\r\n\r\n' + text;
+      });
+      _7zProcess.on('close', (data) => {
+        if (_7zProcess.myClosingMessage) {
+          alert(_7zProcess.myClosingMessage);
+        }
+      });
+    })(0);
   }
 </script>
 <title>medusa</title>
@@ -166,8 +205,8 @@
         <button id="openHistory" class="btn btn-primary text-center" style="width:3em;"><span class="glyphicon glyphicon-list-alt"></span></button>
       </div>
     </div>
-    <div class="row">&nbsp;</div>
-    <div class="row">
+    <div class="row" style="height:32px;">&nbsp;</div>
+    <div class="row text-right">
       <button id="close" class="btn btn-default">Close</button>
     </div>
   </div>
@@ -196,7 +235,7 @@
           <table style="width:100%; margin-bottom:1em;"><tr><td><!-- floatだとモーダルからはみ出たのでtableレイアウトにする -->
             <button id="openNewPassword" class="btn btn-danger" data-dismiss="modal">New password</button>
           </td><td class="text-right">
-            <button class="btn btn-warn" data-dismiss="modal">Close</button>
+            <button class="btn btn-default" data-dismiss="modal">Close</button>
           </td></tr></table>
           <table id="passwordHistory" class="table table-bordered"></table>
         </div>
@@ -224,5 +263,21 @@
       </div>
     </div>
   </div>
+
+  <div id="modalOverwriteConfirm" class="modal fade" tabindex="-1" role="dialog">
+    <div class="modal-dialog" role="document">
+      <div class="modal-content">
+        <div class="modal-body" style="max-height:80px;max-width:400px;overflow-y:scroll;padding-bottom:0;">
+          同名のファイル／フォルダが存在します：<span id="destFilePath" class="small"></span>
+        </div>
+        <div class="modal-footer">
+          <button id="overwriteAll" class="btn btn-primary" data-dismiss="modal">全て上書き</button>
+          <button id="renameAll" class="btn btn-primary" data-dismiss="modal">全て連番付与</button>
+          <button id="cancelOverwrite" class="btn btn-warning" data-dismiss="modal">キャンセル</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
 </body>
 </html>
