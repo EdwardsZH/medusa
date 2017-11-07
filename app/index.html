@@ -177,7 +177,6 @@
                   _7zProcess.stdin.write('u\r\n'); // リネーム
                 } else {
                   _7zProcess.stdin.write('q\r\n'); // キャンセル
-                  closingMessage = ''; // キャンセル時は黙って終了する
                 }
               })
               .modal('show');
