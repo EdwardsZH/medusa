@@ -5,12 +5,7 @@
 <link href="../node_modules/bootstrap/dist/css/bootstrap.min.css" rel="stylesheet">
 <script>
   window.onerror = function(e) {
-    alert(typeof(e));
-    if (String(e).includes('EVP_DecryptFinal_ex:bad decrypt')) {
-      alert('パスワードが違います');
-    } else {
-      alert('システムエラーが発生しました。\r\n管理者に問い合わせてください。\r\n\r\n' + e);
-    }
+    alert('システムエラーが発生しました。\r\n管理者に問い合わせてください。\r\n\r\n' + e);
   };
 
   // Node.jsライブラリをインポートする
@@ -28,7 +23,6 @@
   const _7z = require('7zip')['7z'];
 
   const config = yaml.safeLoad(fs.readFileSync('medusa.yml', 'utf8'));
-  var _7zProcess;
 
   $(function() {
     // イベントリスナ間の受け渡しオブジェクト (TODO:modal要素に持たせて閉じたらクリアするように変更する)
@@ -63,24 +57,36 @@
     }).on('keyup', () => {
       const password = $('#password').val(); // thisでは取れないので検索し直す
       if (toHash(password) === config.latestHash) {
-        // 最新のパスワードと一致した場合は色で知らせる
+        // 最新パスワードと一致した場合は色で知らせる
         $('#passwordInputGroup').addClass('has-success');
       } else {
         $('#passwordInputGroup').removeClass('has-success');
       }
     });
     $('#enterPassword').on('click', () => {
-      const password = $('#password').val();
+      const inputPassword = $('#password').val();
       if (modalStatus.action === 'zip') {
         if (/(.+)\.zip/.test(modalStatus.srcFilePath)) {
           const destFilePath = RegExp.$1;
-          unzip(modalStatus.srcFilePath, destFilePath, decryptHistory(config.cryptedHistory, password));
+          var passwordHistory;
+          try {
+            passwordHistory = decryptHistory(config.cryptedHistory, inputPassword);
+          } catch(e) {
+            passwordHistory = [inputPassword]; // 最新パスワードと一致しなくても、入力されたパスワードで解凍しに行く
+          }
+          unzip(modalStatus.srcFilePath, destFilePath, passwordHistory);
         } else {
           zip(modalStatus.srcFilePath);
         }
       } else if (modalStatus.action === 'history') {
         const table = $('#passwordHistory').empty(); // TODO:履歴モーダルを閉じた時点で消しておきたい情報
-        const passwordHistory = decryptHistory(config.cryptedHistory, password);
+        var passwordHistory;
+        try {
+          passwordHistory = decryptHistory(config.cryptedHistory, inputPassword);
+        } catch(e) {
+          alert('パスワードが違います');
+          return null;
+        }
         passwordHistory.forEach((val) => table.append($('<tr>').append($('<td>').text(val))));
         modalStatus = { passwordHistory: passwordHistory };
         $('#modalHistory').modal('show');
@@ -106,14 +112,13 @@
       config.cryptedHistory = cryptHistory(modalStatus.passwordHistory, newPassword); // 新しいパスワードで再暗号化する
       fs.writeFileSync('medusa.yml', yaml.safeDump(config, { flowLevel: 2 }), 'utf8');
     });
-    $('#overwriteAll').on('click', () => {
-      _7zProcess.myStdinMessage = 'a\r\n';
-    });
-    $('#renameAll').on('click', () => {
-      _7zProcess.myStdinMessage = 'u\r\n';
+    $('#overwriteAll, #renameAll, #cancelOverwrite').on('click', (event) => {
+      $('#modalOverwriteConfirm').data('buttonId', event.currentTarget.id);
     });
     $('#modalOverwriteConfirm').on('hidden.bs.modal', () => {
-      _7zProcess.stdin.write(_7zProcess.myStdinMessage || 'q\r\n');
+      const buttonId = $('#modalOverwriteConfirm').data('buttonId');
+      const callback = $('#modalOverwriteConfirm').data('callback');
+      callback(buttonId);
     });
   });
 
@@ -154,38 +159,53 @@
     (function unzipRecursively(i) {
       const destFileName = 'dest';
       const _7zArgs = ['x', '-tzip', '-p' + passwordHistory[i], '-o' + destFilePath, srcFilePath];
-      try {
-        _7zProcess = child_process.spawn(_7z, _7zArgs);
-      } catch (e) {
-        alert('7z:' + e);
-      }
-      _7zProcess.myClosingMessage = 'complete!';
+      const _7zProcess = child_process.spawn(_7z, _7zArgs);
+      var closingMode;
       _7zProcess.stdout.on('data', (data) => {
         const text = iconv.decode(data, 'Shift_JIS');
+        // 上書き確認された場合、再帰呼び出し時は必ず上書き、それ以外の場合はモーダルを出して聞く
         if (text.includes('Would you like to replace the existing file')) {
           if (i > 0) {
-            _7zProcess.stdin.write('a\r\n');
+            _7zProcess.stdin.write('a\r\n'); // 上書き
           } else {
             $('#destFilePath').text(destFilePath);
-            $('#modalOverwriteConfirm').modal('show');
+            $('#modalOverwriteConfirm')
+              .data('callback', (buttonId) => {
+                if (buttonId === 'overwriteAll') {
+                  _7zProcess.stdin.write('a\r\n'); // 上書き
+                } else if (buttonId === 'renameAll') {
+                  _7zProcess.stdin.write('u\r\n'); // リネーム
+                } else {
+                  _7zProcess.stdin.write('q\r\n'); // キャンセル
+                  closingMessage = ''; // キャンセル時は黙って終了する
+                }
+              })
+              .modal('show');
           }
         }
       });
       _7zProcess.stderr.on('data', (data) => {
         const text = iconv.decode(data, 'Shift_JIS');
-        if (text.includes('Wrong password') && i + 1 < passwordHistory.length) {
-          unzipRecursively(i + 1);
-          return;
-        }
         if (text.includes('Break signaled')) {
-          _7zProcess.myClosingMessage = ''; // キャンセル時は無言で終了する
           return;
         }
-        _7zProcess.myClosingMessage = 'zipコマンドに失敗しました。\r\n管理者に問い合わせてください。\r\n\r\n' + text;
+        if (text.includes('Wrong password')) {
+          if (i + 1 < passwordHistory.length) {
+            closingMode = 'RETRY'; // リトライする場合は黙って終了する
+          } else {
+            closingMode = 'FAIL';
+          }
+          return;
+        }
+        throw text;
       });
       _7zProcess.on('close', (data) => {
-        if (_7zProcess.myClosingMessage) {
-          alert(_7zProcess.myClosingMessage);
+        if (closingMode === 'RETRY') {
+          unzipRecursively(i + 1);
+        } else if(closingMode === 'FAIL') {
+          alert((i == 0) ? 'パスワードが一致しません。' : 'パスワード履歴のどれにも一致しません。');
+        } else {
+          alert('解凍しました');
         }
       });
     })(0);
