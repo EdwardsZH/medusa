@@ -25,101 +25,122 @@
   const config = yaml.safeLoad(fs.readFileSync('medusa.yml', 'utf8'));
 
   $(function() {
-    // イベントリスナ間の受け渡しオブジェクト (TODO:modal要素に持たせて閉じたらクリアするように変更する)
-    var modalStatus;
-
-    // イベントリスナを登録する
+    // メインウィンドウのイベントリスナを登録する
     $('#chooseFile, #chooseFolder').on('change', (event) => {
-      modalStatus = { action: 'zip', srcFilePath: event.currentTarget.files[0].path };
+      $('#modalPasswordZip').data('srcFilePath', event.currentTarget.files[0].path).modal('show');
       event.currentTarget.value = ''; // 同じものを再度対象にしたときもchangeイベントが走るようにクリアする
-      $('#modalPassword').modal('show');
     });
-    $("#openHistory").on('click', () => {
-      modalStatus = { action: 'history' };
-      $('#modalPassword').modal('show');
-    });
-    $("#openSettings").on('click', () => {
-      alert('Will open modal to set zip/unzip application path');
-    });
-    $('#close').on('click', () => {
-      electron.remote.getCurrentWindow().close();
-    });
+    $("#openHistory").on('click', () => $('#modalPasswordHistory').modal('show'));
+    $('#close').on('click', () => electron.remote.getCurrentWindow().close());
 
-    // modal系イベントリスナを登録する
-    $('.modal').on('shown.bs.modal', () => {
-      $(this).find('input[type="password"]').first().focus(); // modal要素が開いたらパスワードにフォーカス
-    }).on('hidden.bs.modal', () => {
-      $(this).find('input[type="password"]').val(''); // modal要素が閉じたらパスワードをクリア
-      $('#passwordInputGroup').removeClass('has-success'); // パスワード一致の色も消しておく
-    });
-    $('#password').on('keypress', (event) => {
-      if (event.keyCode === 13) $('#enterPassword').click();
-    }).on('keyup', () => {
-      const password = $('#password').val(); // thisでは取れないので検索し直す
-      if (toHash(password) === config.latestHash) {
+    // zip/unzip用パスワードモーダルにイベントリスナを登録する
+    $('#modalPasswordZip')
+      .on('shown.bs.modal', () => $('#modalPasswordZipPassword').focus())
+      .on('hidden.bs.modal', () => {
+        $('#modalPasswordZipPassword').val(''); // パスワードをクリアする
+        $('#inputGroupZip').removeClass('has-success'); // ボタンの状態も戻す
+      });
+    $('#modalPasswordZipPassword')
+      .on('keypress', (event) => (event.keyCode === 13) ? $('#modalPasswordZipOk').click() : true)
+      .on('keyup', () => {
+        const modalPasswordZipPassword = $('#modalPasswordZipPassword'); // thisでは取れないので検索し直す
         // 最新パスワードと一致した場合は色で知らせる
-        $('#passwordInputGroup').addClass('has-success');
-      } else {
-        $('#passwordInputGroup').removeClass('has-success');
-      }
-    });
-    $('#enterPassword').on('click', () => {
-      const inputPassword = $('#password').val();
-      if (modalStatus.action === 'zip') {
-        if (/(.+)\.zip/.test(modalStatus.srcFilePath)) {
-          const destFilePath = RegExp.$1;
-          var passwordHistory;
-          try {
-            passwordHistory = decryptHistory(config.cryptedHistory, inputPassword);
-          } catch(e) {
-            passwordHistory = [inputPassword]; // 最新パスワードと一致しなくても、入力されたパスワードで解凍しに行く
-          }
-          unzip(modalStatus.srcFilePath, destFilePath, passwordHistory);
-        } else {
-          zip(modalStatus.srcFilePath);
-        }
-      } else if (modalStatus.action === 'history') {
-        const table = $('#passwordHistory').empty(); // TODO:履歴モーダルを閉じた時点で消しておきたい情報
+        (toHash(modalPasswordZipPassword.val()) === config.latestHash)
+          ? modalPasswordZipPassword.parent('.input-group').addClass('has-success')
+          : modalPasswordZipPassword.parent('.input-group').removeClass('has-success');
+      });
+    $('#modalPasswordZipOk').on('click', () => {
+      const srcFilePath = $('#modalPasswordZip').data('srcFilePath');
+      const inputPassword = $('#modalPasswordZipPassword').val();
+      // カレントディレクトリをファイルと同じディレクトリに移動しておく
+      process.chdir(path.dirname(srcFilePath));
+      // 拡張子で圧縮か解凍かを判別する
+      if (path.extname(srcFilePath) === '.zip') {
+        const destFilePath = path.dirname(srcFilePath);
         var passwordHistory;
         try {
           passwordHistory = decryptHistory(config.cryptedHistory, inputPassword);
         } catch(e) {
-          alert('パスワードが違います');
-          return null;
+          passwordHistory = [inputPassword]; // 最新パスワードと一致しなくても、入力されたパスワードで解凍しに行く
         }
+        unzip(srcFilePath, passwordHistory);
+      } else {
+        zip(srcFilePath, inputPassword);
+      }
+    });
+
+    // History用パスワードモーダルにイベントリスナを登録する
+    $('#modalPasswordHistory')
+      .on('shown.bs.modal', () => $('#modalPasswordHistoryPassword').focus())
+      .on('hidden.bs.modal', () => {
+        $('#modalPasswordHistoryPassword').val(''); // パスワードをクリアする
+        $('#modalPasswordHistoryOk').prop('disabled', true).removeClass('btn-success'); // ボタンの状態も戻す
+      });
+    $('#modalPasswordHistoryPassword')
+      .on('keypress', (event) => (event.keyCode === 13) ? $('#modalPasswordHistoryOk').click() : true)
+      .on('keyup', () => {
+        const modalPasswordHistoryPassword = $('#modalPasswordHistoryPassword'); // thisでは取れないので検索し直す
+        if (toHash(modalPasswordHistoryPassword.val()) === config.latestHash) {
+          // 最新パスワードと一致すればボタンを押せるようにする
+          $('#modalPasswordHistoryOk').prop('disabled', false).addClass('btn-success');
+        } else {
+          $('#modalPasswordHistoryOk').prop('disabled', true).removeClass('btn-success');
+        }
+      });
+    $('#modalPasswordHistoryOk').on('click', () => {
+      const passwordHistory = decryptHistory(config.cryptedHistory, $('#modalPasswordHistoryPassword').val());
+      $('#modalHistory').data('passwordHistory', passwordHistory).modal('show');
+    });
+
+    // Historyのモーダルにイベントリスナを登録する
+    $('#modalHistory')
+      .on('shown.bs.modal', () => {
+        const passwordHistory = $("#modalHistory").data('passwordHistory');
+        const table = $('#modalHistoryTable');
         passwordHistory.forEach((val) => table.append($('<tr>').append($('<td>').text(val))));
-        modalStatus = { passwordHistory: passwordHistory };
-        $('#modalHistory').modal('show');
-      }
-    });
+      })
+      .on('hidden.bs.modal', () => {
+        $('#modalHistoryTable').empty(); // テーブルをクリアする
+      });
     $('#openNewPassword').on('click', () => {
-      $('#modalNewPassword').modal('show');
+      const passwordHistory = $("#modalHistory").data('passwordHistory');
+      $('#modalNewPassword').data('passwordHistory', passwordHistory).modal('show');
     });
-    $('#newPassword, #newPassword2').on('keyup', () => {
-      const newPassword = $('#newPassword').val();
-      if (newPassword) {
-        if ($('#newPassword2').val() === newPassword) {
-          // パスワードが一致すればボタンを押せるようにする
-          $('#addNewPassword').prop('disabled', false).addClass('btn-success');
-          return;
-        }
-      }
-      $('#addNewPassword').prop('disabled', true).removeClass('btn-success');
-    });
+
+    // パスワード追加のモーダルにイベントリスナを登録する
+    $('#modalNewPassword')
+      .on('shown.bs.modal', () => $('#newPassword').focus())
+      .on('hidden.bs.modal', () => {
+        $('#newPassword, #newPassword2').val(''); // パスワードをクリアする
+        $('#addNewPassword').prop('disabled', true).removeClass('btn-success'); // ボタンの状態も戻す
+      });
+    $('#newPassword, #newPassword2')
+      .on('keypress', (event) => (event.keyCode === 13) ? $('#addNewPassword').click() : true)
+      .on('keyup', () => {
+        const newPassword = $('#newPassword').val();
+        // パスワードが一致すればボタンを押せるようにする
+        (newPassword && newPassword === $('#newPassword2').val())
+          ? $('#addNewPassword').prop('disabled', false).addClass('btn-success')
+          : $('#addNewPassword').prop('disabled', true).removeClass('btn-success');
+      });
     $('#addNewPassword').on('click', () => {
+      const passwordHistory = $('#modalNewPassword').data('passwordHistory');
       const newPassword = $('#newPassword').val();
       config.latestHash = toHash(newPassword); // 新しいパスワードのハッシュを作る
-      config.cryptedHistory = cryptHistory(modalStatus.passwordHistory, newPassword); // 新しいパスワードで再暗号化する
+      config.cryptedHistory = cryptHistory(passwordHistory, newPassword); // 新しいパスワードで再暗号化する
       fs.writeFileSync('medusa.yml', yaml.safeDump(config, { flowLevel: 2 }), 'utf8');
     });
-    $('#overwriteAll, #renameAll, #cancelOverwrite').on('click', (event) => {
-      $('#modalOverwriteConfirm').data('buttonId', event.currentTarget.id);
-    });
-    $('#modalOverwriteConfirm').on('hidden.bs.modal', () => {
-      const buttonId = $('#modalOverwriteConfirm').data('buttonId');
-      const callback = $('#modalOverwriteConfirm').data('callback');
-      callback(buttonId);
-    });
+
+    // 上書き確認モーダルにイベントリスナを登録する
+    $('#modalOverwriteConfirm')
+      .on('shown.bs.modal', () => $('#modalOverwriteConfirm').data('overwriteMode', null))
+      .on('hidden.bs.modal', () => {
+        const modalOverwriteConfirm = $('#modalOverwriteConfirm');
+        const _7zOverwriteListener = modalOverwriteConfirm.data('_7zOverwriteListener');
+        _7zOverwriteListener(modalOverwriteConfirm.data('overwriteMode'));
+      });
+    $('#overwriteAll').on('click', (event) => $('#modalOverwriteConfirm').data('overwriteMode', 'OVERWRITE'));
+    $('#renameAll').on('click', (event) => $('#modalOverwriteConfirm').data('overwriteMode', 'RENAME'));
   });
 
   function cryptHistory(passwordHistory, newPassword) {
@@ -155,56 +176,56 @@
       alert('complete');
     });
   }
-  function unzip(srcFilePath, destFilePath, passwordHistory) {
+  function unzip(srcFilePath, passwordHistory) {
     (function unzipRecursively(i) {
-      const destFileName = 'dest';
-      const _7zArgs = ['x', '-tzip', '-p' + passwordHistory[i], '-o' + destFilePath, srcFilePath];
+      const _7zArgs = ['x', '-tzip', '-p' + passwordHistory[i], srcFilePath];
       const _7zProcess = child_process.spawn(_7z, _7zArgs);
       var closingMode;
       _7zProcess.stdout.on('data', (data) => {
         const text = iconv.decode(data, 'Shift_JIS');
-        // 上書き確認された場合、再帰呼び出し時は必ず上書き、それ以外の場合はモーダルを出して聞く
-        if (text.includes('Would you like to replace the existing file')) {
+        if (text.includes('Everything is Ok')) {
+          closingMode = 'SUCCESS';
+          return;
+        }
+        // 上書き確認された場合
+        if (/Would you like to replace the existing file:\r\n +Path: +(.+)/.test(text)) {
+          const destFilePath = path.resolve(RegExp.$1);
+          // 再帰呼び出し時は、stdinに上書きであること伝える
           if (i > 0) {
             _7zProcess.stdin.write('a\r\n'); // 上書き
-          } else {
-            $('#destFilePath').text(destFilePath);
-            $('#modalOverwriteConfirm')
-              .data('callback', (buttonId) => {
-                if (buttonId === 'overwriteAll') {
-                  _7zProcess.stdin.write('a\r\n'); // 上書き
-                } else if (buttonId === 'renameAll') {
-                  _7zProcess.stdin.write('u\r\n'); // リネーム
-                } else {
-                  _7zProcess.stdin.write('q\r\n'); // キャンセル
-                }
-              })
-              .modal('show');
+            return;
           }
+          // それ以外の場合はモーダルを出して聞いて、その結果をstdinに伝える
+          $('#destFilePath').text(destFilePath);
+          $('#modalOverwriteConfirm')
+            .data('_7zOverwriteListener', (overwriteMode) => {
+              if (overwriteMode === 'OVERWRITE') {
+                _7zProcess.stdin.write('a\r\n'); // 上書き
+              } else if (overwriteMode === 'RENAME') {
+                _7zProcess.stdin.write('u\r\n'); // リネーム
+              } else {
+                _7zProcess.stdin.write('q\r\n'); // キャンセル
+              }
+            })
+            .modal('show');
         }
       });
       _7zProcess.stderr.on('data', (data) => {
         const text = iconv.decode(data, 'Shift_JIS');
         if (text.includes('Break signaled')) {
-          return;
+          closingMode = 'QUIT';
         }
         if (text.includes('Wrong password')) {
-          if (i + 1 < passwordHistory.length) {
-            closingMode = 'RETRY'; // リトライする場合は黙って終了する
-          } else {
-            closingMode = 'FAIL';
-          }
-          return;
+          closingMode = (i + 1 < passwordHistory.length) ? 'RETRY' : 'FAIL';
         }
-        throw text;
       });
       _7zProcess.on('close', (data) => {
-        if (closingMode === 'RETRY') {
+        if (closingMode === 'SUCCESS') {
+          alert((i == 0) ? '解凍しました。' : (i + 'つ前のパスワードで解凍しました。'));
+        } else if (closingMode === 'RETRY') {
           unzipRecursively(i + 1);
         } else if(closingMode === 'FAIL') {
           alert((i == 0) ? 'パスワードが一致しません。' : 'パスワード履歴のどれにも一致しません。');
-        } else {
-          alert('解凍しました');
         }
       });
     })(0);
@@ -230,17 +251,34 @@
     </div>
   </div>
 
-  <div id="modalPassword" class="modal fade" tabindex="-1" role="dialog">
+  <div id="modalPasswordZip" class="modal fade" tabindex="-1" role="dialog">
     <div class="modal-dialog" role="document">
       <div class="modal-content">
         <div class="modal-body">
           <table><tr><td><!-- floatだとモーダルからはみ出たのでtableレイアウトにする -->
-            <div id="passwordInputGroup" class="input-group">
+            <div id="inputGroupZip" class="input-group">
               <span class="input-group-addon">password</span>
-              <input id="password" type="password" class="form-control" aria-describedby="basic-addon3">
+              <input id="modalPasswordZipPassword" type="password" class="form-control" aria-describedby="basic-addon3">
             </div>
           </td><td style="padding-left:1em;">
-            <button id="enterPassword" class="btn btn-primary" data-dismiss="modal">OK</button>
+            <button id="modalPasswordZipOk" class="btn btn-primary" data-dismiss="modal">OK</button>
+          </td></tr></table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="modalPasswordHistory" class="modal fade" tabindex="-1" role="dialog">
+    <div class="modal-dialog" role="document">
+      <div class="modal-content">
+        <div class="modal-body">
+          <table><tr><td><!-- floatだとモーダルからはみ出たのでtableレイアウトにする -->
+            <div id="inputGroupHistory" class="input-group">
+              <span class="input-group-addon">password</span>
+              <input id="modalPasswordHistoryPassword" type="password" class="form-control" aria-describedby="basic-addon3">
+            </div>
+          </td><td style="padding-left:1em;">
+            <button id="modalPasswordHistoryOk" class="btn" disabled="disabled" data-dismiss="modal">OK</button>
           </td></tr></table>
         </div>
       </div>
@@ -256,7 +294,7 @@
           </td><td class="text-right">
             <button class="btn btn-default" data-dismiss="modal">Close</button>
           </td></tr></table>
-          <table id="passwordHistory" class="table table-bordered"></table>
+          <table id="modalHistoryTable" class="table table-bordered"></table>
         </div>
       </div>
     </div>
