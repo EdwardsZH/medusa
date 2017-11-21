@@ -31,6 +31,7 @@
       event.currentTarget.value = ''; // 同じものを再度対象にしたときもchangeイベントが走るようにクリアする
     });
     $("#openHistory").on('click', () => $('#modalPasswordHistory').modal('show'));
+    $('#openSettings').on('click', () => $('#modalSettings').modal('show'));
     $('#close').on('click', () => electron.remote.getCurrentWindow().close());
 
     // zip/unzip用パスワードモーダルにイベントリスナを登録する
@@ -88,7 +89,6 @@
       const passwordHistory = decryptHistory(config.cryptedHistory, $('#modalPasswordHistoryPassword').val());
       $('#modalHistory').data('passwordHistory', passwordHistory).modal('show');
     });
-
     // Historyのモーダルにイベントリスナを登録する
     $('#modalHistory')
       .on('shown.bs.modal', () => {
@@ -103,7 +103,6 @@
       const passwordHistory = $("#modalHistory").data('passwordHistory');
       $('#modalNewPassword').data('passwordHistory', passwordHistory).modal('show');
     });
-
     // パスワード追加のモーダルにイベントリスナを登録する
     $('#modalNewPassword')
       .on('shown.bs.modal', () => $('#newPassword').focus())
@@ -128,7 +127,17 @@
       fs.writeFileSync('medusa.yml', yaml.safeDump(config, { flowLevel: 2 }), 'utf8');
     });
 
-    // 上書き確認モーダルにイベントリスナを登録する
+    // 設定モーダルにイベントリスナを登録する
+    $('#modalSettings')
+      .on('shown.bs.modal', () => {
+        $('#modalSettingsIsAutoOpenFolder').prop('checked', config.isAutoOpenFolder);
+      });
+    $('#saveSettings').on('click', () => {
+      config.isAutoOpenFolder = $('#modalSettingsIsAutoOpenFolder').prop('checked');
+      fs.writeFileSync('medusa.yml', yaml.safeDump(config, { flowLevel: 2 }), 'utf8');
+    });
+
+    // zip用上書き確認モーダルにイベントリスナを登録する
     $('#modalOverwriteZip')
       .on('shown.bs.modal', () => $('#modalOverwriteZip').data('overwriteMode', null))
       .on('hidden.bs.modal', () => {
@@ -138,7 +147,7 @@
       });
     $('#overwriteZip').on('click', (event) => $('#modalOverwriteZip').data('overwriteMode', 'OVERWRITE'));
 
-    // 上書き確認モーダルにイベントリスナを登録する
+    // unzip用上書き確認モーダルにイベントリスナを登録する
     $('#modalOverwriteUnzip')
       .on('shown.bs.modal', () => $('#modalOverwriteUnzip').data('overwriteMode', null))
       .on('hidden.bs.modal', () => {
@@ -188,7 +197,7 @@
       });
       _7zProcess.stderr.on('data', (data) => {
         const text = iconv.decode(data, 'Shift_JIS');
-        alert(text);
+        alert('zip-stderr:' + text);
       });
       _7zProcess.on('close', (data) => {
         if (closingMode === 'SUCCESS') {
@@ -229,7 +238,7 @@
     (function unzipRecursively(i) {
       const _7zArgs = ['x', '-tzip', '-p' + passwordHistory[i], srcFilePath];
       const _7zProcess = child_process.spawn(_7z, _7zArgs);
-      var closingMode;
+      var closingMode = 'QUIT';
       _7zProcess.stdout.on('data', (data) => {
         const text = iconv.decode(data, 'Shift_JIS');
         if (text.includes('Everything is Ok')) {
@@ -262,19 +271,25 @@
       _7zProcess.stderr.on('data', (data) => {
         const text = iconv.decode(data, 'Shift_JIS');
         if (text.includes('Break signaled')) {
-          closingMode = 'QUIT';
+          return;
         }
         if (text.includes('Wrong password')) {
           closingMode = (i + 1 < passwordHistory.length) ? 'RETRY' : 'FAIL';
+        } else if (text.includes('Is not archive')) {
+          closingMode = 'NOT_ARCHIVE';
+        } else {
+          alert('unzip-stderr:' + text);
         }
       });
       _7zProcess.on('close', (data) => {
         if (closingMode === 'SUCCESS') {
-          alert((i == 0) ? '解凍しました。' : (i + 'つ前のパスワードで解凍しました。'));
+          alert((i === 0) ? '解凍しました。' : (i + 'つ前のパスワードで解凍しました。'));
         } else if (closingMode === 'RETRY') {
           unzipRecursively(i + 1);
-        } else if(closingMode === 'FAIL') {
-          alert((i == 0) ? 'パスワードが一致しません。' : 'パスワード履歴のどれにも一致しません。');
+        } else if (closingMode === 'FAIL') {
+          alert((i === 0) ? 'パスワードが一致しません。' : 'パスワード履歴のどれにも一致しません。');
+        } else if (closingMode === 'NOT_ARCHIVE') {
+          alert('解凍可能なファイルではありません。');
         }
       });
     })(0);
@@ -283,15 +298,18 @@
 <title>medusa</title>
 </head>
 <body style="padding:2em;">
+  <!-- メインウィンドウ -->
   <div class="container-fluid">
     <div class="row">
       <div class="pull-left">
         <label><span class="btn btn-primary">File<input id="chooseFile" type="file" style="display:none"></span></label>
+        &nbsp;
         <label><span class="btn btn-primary">Folder<input id="chooseFolder" type="file" style="display:none" webkitdirectory directory></span></label>
       </div>
       <div class="pull-right">
-        <!-- 描画後にボタンの幅がピクピク調整されてしまう問題を防ぐためにwidthを明示的に指定しておく -->
-        <button id="openHistory" class="btn btn-primary text-center" style="width:3em;"><span class="glyphicon glyphicon-list-alt"></span></button>
+        <button id="openHistory" class="btn btn-primary"><span class="glyphicon glyphicon-th-list"></span></button>
+        &nbsp;
+        <button id="openSettings" class="btn btn-primary"><span class="glyphicon glyphicon-cog"></span></button>
       </div>
     </div>
     <div class="row" style="height:32px;">&nbsp;</div>
@@ -300,6 +318,7 @@
     </div>
   </div>
 
+  <!-- zip/unzip用パスワードモーダル -->
   <div id="modalPasswordZip" class="modal fade" tabindex="-1" role="dialog">
     <div class="modal-dialog" role="document">
       <div class="modal-content">
@@ -317,6 +336,7 @@
     </div>
   </div>
 
+  <!-- History用パスワードモーダル -->
   <div id="modalPasswordHistory" class="modal fade" tabindex="-1" role="dialog">
     <div class="modal-dialog" role="document">
       <div class="modal-content">
@@ -333,7 +353,7 @@
       </div>
     </div>
   </div>
-
+  <!-- Historyのモーダル -->
   <div id="modalHistory" class="modal fade" tabindex="-1" role="dialog">
     <div class="modal-dialog" role="document">
       <div class="modal-content" style="max-height:140px;overflow-y:scroll;">
@@ -348,7 +368,7 @@
       </div>
     </div>
   </div>
-
+  <!-- パスワード追加のモーダル -->
   <div id="modalNewPassword" class="modal fade" tabindex="-1" role="dialog">
     <div class="modal-dialog" role="document">
       <div class="modal-content">
@@ -370,6 +390,25 @@
     </div>
   </div>
 
+  <!-- 設定モーダル -->
+  <div id="modalSettings" class="modal fade" tabindex="-1" role="dialog">
+    <div class="modal-dialog" role="document">
+      <div class="modal-content">
+        <div class="modal-body">
+          <div class="input-group">
+            <span class="input-group-addon"><input id="modalSettingsIsAutoOpenFolder" type="checkbox"></span>
+            <span class="form-control" aria-label="Text input with checkbox">処理後にフォルダを開く</span>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button id="saveSettings" class="btn" data-dismiss="modal">OK</button>
+          <button class="btn btn-default" data-dismiss="modal">キャンセル</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- zip用上書き確認モーダル -->
   <div id="modalOverwriteZip" class="modal fade" tabindex="-1" role="dialog">
     <div class="modal-dialog" role="document">
       <div class="modal-content">
@@ -383,7 +422,7 @@
       </div>
     </div>
   </div>
-
+  <!-- unzip用上書き確認モーダル -->
   <div id="modalOverwriteUnzip" class="modal fade" tabindex="-1" role="dialog">
     <div class="modal-dialog" role="document">
       <div class="modal-content">
