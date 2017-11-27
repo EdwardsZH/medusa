@@ -25,14 +25,27 @@
   const config = yaml.safeLoad(fs.readFileSync('medusa.yml', 'utf8'));
 
   $(function() {
+    // モーダル共通のイベントリスナを登録する
+    const modals = $('.modal')
+      .on('shown.bs.modal', (event) => $(event.currentTarget).find('input:first').focus())
+      .on('hidden.bs.modal', (event) => {
+        const element = $(event.currentTarget);
+        element.find('input[type="password"]').val(''); // パスワードをクリアする
+        element.find('.input-group').removeClass('has-success'); // ボタンの状態も戻す
+      })
+      .on('keypress', (event) => {
+        if (event.keyCode === 13) { // 入力項目でEnterが押された場合、「data-keypress="enter"」クラスを持つ要素をクリックする
+          $(event.currentTarget).find('[data-keypress="enter"]').click();
+        }
+      });
+
     // メインウィンドウのイベントリスナを登録する
     $('#chooseFileToZip, #chooseFolderToZip').on('change', (event) => {
-      $('#modalPasswordZip').data('srcFilePath', event.currentTarget.files[0].path).modal('show');
+      $('#modalPasswordZip').data('isZip', true).data('srcFilePaths', Array.from(event.currentTarget.files).map(file => file.path)).modal('show');
       event.currentTarget.value = ''; // 同じものを再度対象にしたときもchangeイベントが走るようにクリアする
     });
-    // メインウィンドウのイベントリスナを登録する
     $('#chooseFileToUnzip').on('change', (event) => {
-      $('#modalPasswordZip').data('srcFilePath', event.currentTarget.files[0].path).modal('show');
+      tryUnzipWithoutPassword(event.currentTarget.files[0].path);
       event.currentTarget.value = ''; // 同じものを再度対象にしたときもchangeイベントが走るようにクリアする
     });
     $("#openHistory").on('click', () => $('#modalPasswordHistory').modal('show'));
@@ -40,14 +53,7 @@
     $('#close').on('click', () => electron.remote.getCurrentWindow().close());
 
     // zip/unzip用パスワードモーダルにイベントリスナを登録する
-    $('#modalPasswordZip')
-      .on('shown.bs.modal', () => $('#modalPasswordZipPassword').focus())
-      .on('hidden.bs.modal', () => {
-        $('#modalPasswordZipPassword').val(''); // パスワードをクリアする
-        $('#inputGroupZip').removeClass('has-success'); // ボタンの状態も戻す
-      });
     $('#modalPasswordZipPassword')
-      .on('keypress', (event) => (event.keyCode === 13) ? $('#modalPasswordZipOk').click() : true)
       .on('keyup', () => {
         const modalPasswordZipPassword = $('#modalPasswordZipPassword'); // thisでは取れないので検索し直す
         // 最新パスワードと一致した場合は色で知らせる
@@ -56,19 +62,20 @@
           : modalPasswordZipPassword.parent('.input-group').removeClass('has-success');
       });
     $('#modalPasswordZipOk').on('click', () => {
-      const srcFilePath = $('#modalPasswordZip').data('srcFilePath');
+      const isZip = $('#modalPasswordZip').data('isZip');
       const inputPassword = $('#modalPasswordZipPassword').val();
-      // 拡張子で圧縮か解凍かを判別する
-      if (path.extname(srcFilePath) === '.zip') {
+      if (isZip) {
+        const srcFilePaths = $('#modalPasswordZip').data('srcFilePaths');
+        zip(srcFilePaths, inputPassword);
+      } else {
+        const srcFilePath = $('#modalPasswordZip').data('srcFilePath');
         var passwordHistory;
         try {
           passwordHistory = decryptHistory(config.cryptedHistory, inputPassword);
         } catch(e) {
           passwordHistory = [inputPassword]; // 最新パスワードと一致しなくても、入力されたパスワードで解凍しに行く
         }
-        unzip(srcFilePath, passwordHistory);
-      } else {
-        zip(srcFilePath, inputPassword);
+        unzipWithPassword(srcFilePath, passwordHistory);
       }
     });
 
@@ -80,7 +87,6 @@
         $('#modalPasswordHistoryOk').prop('disabled', true).removeClass('btn-success'); // ボタンの状態も戻す
       });
     $('#modalPasswordHistoryPassword')
-      .on('keypress', (event) => (event.keyCode === 13) ? $('#modalPasswordHistoryOk').click() : true)
       .on('keyup', () => {
         const modalPasswordHistoryPassword = $('#modalPasswordHistoryPassword'); // thisでは取れないので検索し直す
         if (toHash(modalPasswordHistoryPassword.val()) === config.latestHash) {
@@ -116,7 +122,6 @@
         $('#addNewPassword').prop('disabled', true).removeClass('btn-success'); // ボタンの状態も戻す
       });
     $('#newPassword, #newPassword2')
-      .on('keypress', (event) => (event.keyCode === 13) ? $('#addNewPassword').click() : true)
       .on('keyup', () => {
         const newPassword = $('#newPassword').val();
         // パスワードが一致すればボタンを押せるようにする
@@ -142,26 +147,15 @@
       fs.writeFileSync('medusa.yml', yaml.safeDump(config, { flowLevel: 2 }), 'utf8');
     });
 
-    // zip用上書き確認モーダルにイベントリスナを登録する
+    // zip/unzip用上書き確認モーダルにイベントリスナを登録する
     $('#modalOverwriteZip')
-      .on('shown.bs.modal', () => $('#modalOverwriteZip').data('overwriteMode', null))
+      .on('shown.bs.modal', () => $('#modalOverwriteZip').data('isOverwrite', false))
       .on('hidden.bs.modal', () => {
         const modalOverwriteZip = $('#modalOverwriteZip');
         const _7zOverwriteListener = modalOverwriteZip.data('_7zOverwriteListener');
-        _7zOverwriteListener(modalOverwriteZip.data('overwriteMode'));
+        _7zOverwriteListener(modalOverwriteZip.data('isOverwrite'));
       });
-    $('#overwriteZip').on('click', (event) => $('#modalOverwriteZip').data('overwriteMode', 'OVERWRITE'));
-
-    // unzip用上書き確認モーダルにイベントリスナを登録する
-    $('#modalOverwriteUnzip')
-      .on('shown.bs.modal', () => $('#modalOverwriteUnzip').data('overwriteMode', null))
-      .on('hidden.bs.modal', () => {
-        const modalOverwriteUnzip = $('#modalOverwriteUnzip');
-        const _7zOverwriteListener = modalOverwriteUnzip.data('_7zOverwriteListener');
-        _7zOverwriteListener(modalOverwriteUnzip.data('overwriteMode'));
-      });
-    $('#overwriteUnzip').on('click', (event) => $('#modalOverwriteUnzip').data('overwriteMode', 'OVERWRITE'));
-    $('#renameUnzip').on('click', (event) => $('#modalOverwriteUnzip').data('overwriteMode', 'RENAME'));
+    $('#overwriteZip').on('click', (event) => $('#modalOverwriteZip').data('isOverwrite', true));
   });
 
   function cryptHistory(passwordHistory, newPassword) {
@@ -187,10 +181,25 @@
     hash.update(text, 'utf8');
     return hash.digest('hex');
   }
-  function zip(srcFilePath, password) {
-    const destFilePath = path.format($.extend(path.parse(srcFilePath), {base: null, ext: '.zip'}));
-    const startZipProcess = function() { // ローカル変数に依存するローカルな関数
-      const _7zArgs = ['a', '-tzip', '-p' + password, destFilePath, srcFilePath];
+  function zip(srcFilePaths, password = null) {
+    const destFilePath = (function() { // 最初のファイルに"".zip"を付与したファイルパスを作成する
+      const o = path.parse(srcFilePaths[0]);
+      if (o.ext == '.zip') {
+        o.ext = '.zip.zip';
+      } else {
+        o.ext = '.zip';
+      }
+      o.base = null; // 拡張子の変更を効かせるためにファイル名はクリアしておく
+      return path.format(o);
+    })();
+
+    const startZipProcess = function() { // ローカル変数に依存した、7zip起動用ローカル関数
+      const _7zArgs = ['a', '-tzip'];
+      if (password) {
+        _7zArgs.push('-p' + password);
+      }
+      _7zArgs.push(destFilePath);
+      srcFilePaths.forEach(path => _7zArgs.push(path));
       const _7zProcess = child_process.spawn(_7z, _7zArgs);
       var closingMode;
       _7zProcess.stdout.on('data', (data) => {
@@ -219,9 +228,10 @@
       }
       // ファイルは存在する場合、モーダルで上書き確認を行う (ファイルロックを事前判定するいい方法が見当たらなかったので特攻する)
       $('#destFilePathZip').text(destFilePath);
+      $('#overwriteZip').text('上書き');
       $('#modalOverwriteZip')
-        .data('_7zOverwriteListener', (overwriteMode) => {
-          if (overwriteMode === 'OVERWRITE') {
+        .data('_7zOverwriteListener', (isOverwrite) => {
+          if (isOverwrite) {
             // 7zipは上書きしないので、zipファイルを一度消してから7zipを起動する
             fs.unlink(destFilePath, (err) => {
               if (err) {
@@ -235,7 +245,61 @@
         .modal("show");
     });
   }
-  function unzip(srcFilePath, passwordHistory) {
+  function tryUnzipWithoutPassword(srcFilePath) {
+    // カレントディレクトリをファイルと同じディレクトリに移動する
+    process.chdir(path.dirname(srcFilePath));
+    const _7zProcess = child_process.spawn(_7z, ['x', '-tzip', srcFilePath]);
+    var closingMode = 'QUIT';
+    _7zProcess.stdout.on('data', (data) => {
+      const text = iconv.decode(data, 'Shift_JIS');
+      if (text.includes('Everything is Ok')) {
+        closingMode = 'SUCCESS';
+        return;
+      }
+      if (text.includes('Enter password')) {
+        _7zProcess.kill('SIGINT'); // パスワードを求められた場合は一旦killしてパスワード入力を求める
+        closingMode = 'NEED_PASSWORD';
+        return;
+      }
+      // 上書き確認された場合
+      if (/Would you like to replace the existing file:\r\n +Path: +(.+)/.test(text)) {
+        const destFilePath = path.resolve(RegExp.$1);
+        // モーダルを出して聞いて、その結果をstdinに伝える (リネームは複数のパスワードでアタックすると破綻するため上書きのみサポートする)
+        $('#destFilePathZip').text(destFilePath);
+        $('#overwriteZip').text('全て上書き');
+        $('#modalOverwriteZip')
+          .data('_7zOverwriteListener', (isOverwrite) => {
+            if (isOverwrite) {
+              _7zProcess.stdin.write('a\r\n'); // 上書き
+            } else {
+              _7zProcess.stdin.write('q\r\n'); // キャンセル
+            }
+          })
+          .modal('show');
+      }
+    });
+    _7zProcess.stderr.on('data', (data) => {
+      const text = iconv.decode(data, 'Shift_JIS');
+      if (text.includes('Break signaled')) {
+        return;
+      }
+      if (text.includes('Is not archive')) {
+        closingMode = 'NOT_ARCHIVE';
+      } else {
+        alert('unzip-stderr:' + text);
+      }
+    });
+    _7zProcess.on('close', (data) => {
+      if (closingMode === 'SUCCESS') {
+        alert('解凍しました。');
+      } else if (closingMode === 'NEED_PASSWORD') {
+        $('#modalPasswordZip').data('isZip', false).data('srcFilePath', srcFilePath).modal('show');
+      } else if (closingMode === 'NOT_ARCHIVE') {
+        alert('解凍可能なファイルではありません。');
+      }
+    });
+  }
+  function unzipWithPassword(srcFilePath, passwordHistory) {
     // カレントディレクトリをファイルと同じディレクトリに移動する
     process.chdir(path.dirname(srcFilePath));
     // パスワード履歴でunzipする
@@ -251,25 +315,9 @@
         }
         // 上書き確認された場合
         if (/Would you like to replace the existing file:\r\n +Path: +(.+)/.test(text)) {
-          const destFilePath = path.resolve(RegExp.$1);
-          // 再帰呼び出し時は、stdinに上書きであること伝える
-          if (i > 0) {
-            _7zProcess.stdin.write('a\r\n'); // 上書き
-            return;
-          }
-          // それ以外の場合はモーダルを出して聞いて、その結果をstdinに伝える
-          $('#destFilePath').text(destFilePath);
-          $('#modalOverwriteUnzip')
-            .data('_7zOverwriteListener', (overwriteMode) => {
-              if (overwriteMode === 'OVERWRITE') {
-                _7zProcess.stdin.write('a\r\n'); // 上書き
-              } else if (overwriteMode === 'RENAME') {
-                _7zProcess.stdin.write('u\r\n'); // リネーム
-              } else {
-                _7zProcess.stdin.write('q\r\n'); // キャンセル
-              }
-            })
-            .modal('show');
+          // パスワードなしでトライしたときにゴミが残っているので、必ず上書きする
+          _7zProcess.stdin.write('a\r\n'); // 上書き
+          return;
         }
       });
       _7zProcess.stderr.on('data', (data) => {
@@ -307,7 +355,7 @@
     <div class="row">
       <div class="pull-left">
         <!-- glyphiconは描画時に幅を調整してピクピクするので幅を固定値で指定しておく -->
-        <label><span class="btn btn-primary" style="width:62px;"><span class="glyphicon glyphicon-file" style="width:14px;margin-right:4px;"></span>zip<input id="chooseFileToZip" type="file" style="display:none"></span></label>
+        <label><span class="btn btn-primary" style="width:62px;"><span class="glyphicon glyphicon-file" style="width:14px;margin-right:4px;"></span>zip<input id="chooseFileToZip" type="file" style="display:none" multiple="multiple"></span></label>
         &nbsp;
         <label><span class="btn btn-primary" style="width:66px;"><span class="glyphicon glyphicon-folder-open" style="width:14px;margin-right:8px;"></span>zip<input id="chooseFolderToZip" type="file" style="display:none" webkitdirectory directory></span></label>
       </div>
@@ -338,7 +386,7 @@
               <input id="modalPasswordZipPassword" type="password" class="form-control" aria-describedby="basic-addon3">
             </div>
           </td><td style="padding-left:1em;">
-            <button id="modalPasswordZipOk" class="btn btn-primary" data-dismiss="modal">OK</button>
+            <button id="modalPasswordZipOk" class="btn btn-primary" data-dismiss="modal" data-keypress="enter">OK</button>
           </td></tr></table>
         </div>
       </div>
@@ -356,7 +404,7 @@
               <input id="modalPasswordHistoryPassword" type="password" class="form-control" aria-describedby="basic-addon3">
             </div>
           </td><td style="padding-left:1em;">
-            <button id="modalPasswordHistoryOk" class="btn" disabled="disabled" data-dismiss="modal">OK</button>
+            <button id="modalPasswordHistoryOk" class="btn" disabled="disabled" data-dismiss="modal" data-keypress="enter">OK</button>
           </td></tr></table>
         </div>
       </div>
@@ -392,7 +440,7 @@
               <input id="newPassword2" type="password" class="form-control" aria-describedby="basic-addon3"><br>
             </div>
           </td><td style="padding-left:1em;vertical-align:bottom;">
-            <button id="addNewPassword" class="btn" disabled="disabled" data-dismiss="modal">Add</button>
+            <button id="addNewPassword" class="btn" disabled="disabled" data-dismiss="modal" data-keypress="enter">Add</button>
           </td></tr></table>
         </div>
       </div>
@@ -417,30 +465,15 @@
     </div>
   </div>
 
-  <!-- zip用上書き確認モーダル -->
+  <!-- zip/unzip用上書き確認モーダル -->
   <div id="modalOverwriteZip" class="modal fade" tabindex="-1" role="dialog">
     <div class="modal-dialog" role="document">
       <div class="modal-content">
         <div class="modal-body" style="max-height:80px;max-width:400px;overflow-y:scroll;padding-bottom:0;">
-          同名のzipファイルが存在します：<span id="destFilePathZip" class="small"></span>
+          同名のファイルが存在します：<span id="destFilePathZip" class="small"></span>
         </div>
         <div class="modal-footer">
-          <button id="overwriteZip" class="btn btn-primary" data-dismiss="modal">上書き</button>
-          <button class="btn btn-warning" data-dismiss="modal">キャンセル</button>
-        </div>
-      </div>
-    </div>
-  </div>
-  <!-- unzip用上書き確認モーダル -->
-  <div id="modalOverwriteUnzip" class="modal fade" tabindex="-1" role="dialog">
-    <div class="modal-dialog" role="document">
-      <div class="modal-content">
-        <div class="modal-body" style="max-height:80px;max-width:400px;overflow-y:scroll;padding-bottom:0;">
-          同名のファイル／フォルダが存在します：<span id="destFilePath" class="small"></span>
-        </div>
-        <div class="modal-footer">
-          <button id="overwriteUnzip" class="btn btn-primary" data-dismiss="modal">全て上書き</button>
-          <button id="renameUnzip" class="btn btn-primary" data-dismiss="modal">全て連番付与</button>
+          <button id="overwriteZip" class="btn btn-primary" data-dismiss="modal"></button>
           <button class="btn btn-warning" data-dismiss="modal">キャンセル</button>
         </div>
       </div>
