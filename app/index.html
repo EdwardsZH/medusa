@@ -26,7 +26,12 @@
 
   $(function() {
     // メインウィンドウのイベントリスナを登録する
-    $('#chooseFile, #chooseFolder').on('change', (event) => {
+    $('#chooseFileToZip, #chooseFolderToZip').on('change', (event) => {
+      $('#modalPasswordZip').data('srcFilePath', event.currentTarget.files[0].path).modal('show');
+      event.currentTarget.value = ''; // 同じものを再度対象にしたときもchangeイベントが走るようにクリアする
+    });
+    // メインウィンドウのイベントリスナを登録する
+    $('#chooseFileToUnzip').on('change', (event) => {
       $('#modalPasswordZip').data('srcFilePath', event.currentTarget.files[0].path).modal('show');
       event.currentTarget.value = ''; // 同じものを再度対象にしたときもchangeイベントが走るようにクリアする
     });
@@ -229,7 +234,6 @@
         })
         .modal("show");
     });
-
   }
   function unzip(srcFilePath, passwordHistory) {
     // カレントディレクトリをファイルと同じディレクトリに移動する
@@ -297,24 +301,29 @@
 </script>
 <title>medusa</title>
 </head>
-<body style="padding:2em;">
+<body style="padding:2em 2em 0 2em;">
   <!-- メインウィンドウ -->
   <div class="container-fluid">
     <div class="row">
       <div class="pull-left">
-        <label><span class="btn btn-primary">File<input id="chooseFile" type="file" style="display:none"></span></label>
+        <!-- glyphiconは描画時に幅を調整してピクピクするので幅を固定値で指定しておく -->
+        <label><span class="btn btn-primary" style="width:62px;"><span class="glyphicon glyphicon-file" style="width:14px;margin-right:4px;"></span>zip<input id="chooseFileToZip" type="file" style="display:none"></span></label>
         &nbsp;
-        <label><span class="btn btn-primary">Folder<input id="chooseFolder" type="file" style="display:none" webkitdirectory directory></span></label>
+        <label><span class="btn btn-primary" style="width:66px;"><span class="glyphicon glyphicon-folder-open" style="width:14px;margin-right:8px;"></span>zip<input id="chooseFolderToZip" type="file" style="display:none" webkitdirectory directory></span></label>
       </div>
       <div class="pull-right">
-        <button id="openHistory" class="btn btn-primary"><span class="glyphicon glyphicon-th-list"></span></button>
+        <button id="openHistory" class="btn btn-primary" style="width:40px;"><span class="glyphicon glyphicon-th-list"></span></button>
         &nbsp;
-        <button id="openSettings" class="btn btn-primary"><span class="glyphicon glyphicon-cog"></span></button>
+        <button id="openSettings" class="btn btn-primary" style="width:40px;"><span class="glyphicon glyphicon-cog"></span></button>
       </div>
     </div>
-    <div class="row" style="height:32px;">&nbsp;</div>
-    <div class="row text-right">
-      <button id="close" class="btn btn-default">Close</button>
+    <div class="row">
+      <div class="pull-left">
+        <label><span class="btn btn-primary" style="margin-top:32px;"><span class="glyphicon glyphicon-share" style="width:14px;margin-right:4px;"></span>unzip<input id="chooseFileToUnzip" type="file" style="display:none"></span></label>
+      </div>
+      <div class="pull-right">
+        <button id="close" class="btn btn-default" style="margin-top:32px;"><span class="glyphicon glyphicon-ban-circle" style="width:14px;margin-right:4px;"></span>close</button>
+      </div>
     </div>
   </div>
 
