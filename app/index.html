@@ -72,8 +72,10 @@
         var passwordHistory;
         try {
           passwordHistory = decryptHistory(config.cryptedHistory, inputPassword);
+          passwordHistory.unshift(inputPassword); // 最新パスワードも含める
         } catch(e) {
-          passwordHistory = [inputPassword]; // 最新パスワードと一致しなくても、入力されたパスワードで解凍しに行く
+          // 最新パスワードのハッシュと一致しない場合は例外が発生するが、その場合でも入力されたパスワードそのもので解凍しに行く
+          passwordHistory = [inputPassword];
         }
         unzipWithPassword(srcFilePath, passwordHistory);
       }
@@ -97,7 +99,9 @@
         }
       });
     $('#modalPasswordHistoryOk').on('click', () => {
-      const passwordHistory = decryptHistory(config.cryptedHistory, $('#modalPasswordHistoryPassword').val());
+      const inputPassword = $('#modalPasswordHistoryPassword').val();
+      const passwordHistory = decryptHistory(config.cryptedHistory, inputPassword);
+      passwordHistory.unshift(inputPassword); // 最新パスワードも含める
       $('#modalHistory').data('passwordHistory', passwordHistory).modal('show');
     });
     // Historyのモーダルにイベントリスナを登録する
@@ -131,9 +135,10 @@
       });
     $('#addNewPassword').on('click', () => {
       const passwordHistory = $('#modalNewPassword').data('passwordHistory');
-      const newPassword = $('#newPassword').val();
-      config.latestHash = toHash(newPassword); // 新しいパスワードのハッシュを作る
-      config.cryptedHistory = cryptHistory(passwordHistory, newPassword); // 新しいパスワードで再暗号化する
+      const newPassword = $('#newPassword').val(); // 新しいパスワードのハッシュを作る
+      config.salt = generateSalt(); // TODO 配布ファイルでは空にしておいて、初回起動時にも生成するようにしたい
+      config.latestHash = toHash(newPassword);
+      config.cryptedHistory = cryptHistory(passwordHistory, newPassword); // 新しいパスワードのハッシュで再暗号化する
       fs.writeFileSync('medusa.yml', yaml.safeDump(config, { flowLevel: 2 }), 'utf8');
     });
 
@@ -158,28 +163,36 @@
     $('#overwriteZip').on('click', (event) => $('#modalOverwriteZip').data('isOverwrite', true));
   });
 
-  function cryptHistory(passwordHistory, newPassword) {
-    const crypt = function(text, password) {
-      const cipher = crypto.createCipher('aes256', password + '__SALT__');
+  function generateSalt() {
+    return crypto.randomBytes(4).toString('hex');
+  }
+  function cryptHistory(passwordHistory, password) {
+    const _crypt = function(text, pass) {
+      const cipher = crypto.createCipher('aes256', pass);
       cipher.update(text, 'utf8', 'hex');
       return cipher.final('hex');
     };
-    return passwordHistory.map((val) => crypt(val, newPassword));
+    return passwordHistory.map((val) => _crypt(val, password + config.salt));
   }
   function decryptHistory(cryptedHistory, password) {
-    const decrypt = function(text, password) {
-      const decipher = crypto.createDecipher('aes256', password + '__SALT__');
+    const _decrypt = function(text, pass) {
+      const decipher = crypto.createDecipher('aes256', pass);
       decipher.update(text, 'hex', 'utf8');
       return decipher.final('utf8');
     };
-    const passwordHistory = cryptedHistory.map((val) => decrypt(val, password));
-    passwordHistory.unshift(password); // 最新パスワードも含める
-    return passwordHistory;
+    return cryptedHistory.map((val) => _decrypt(val, password + config.salt));
   }
   function toHash(text) {
-    const hash = crypto.createHash('sha256');
-    hash.update(text, 'utf8');
-    return hash.digest('hex');
+    const _toHash = function(target) {
+      const hash = crypto.createHash('sha256');
+      hash.update(target + config.salt, 'utf8');
+      return hash.digest('hex');
+    };
+    var stretchedHash = text;
+    for (var i = 0; i < 1000; i++) {
+      stretchedHash = _toHash(stretchedHash);
+    }
+    return stretchedHash;
   }
   function zip(srcFilePaths, password = null) {
     const destFilePath = (function() { // 最初のファイルに"".zip"を付与したファイルパスを作成する

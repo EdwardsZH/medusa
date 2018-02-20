@@ -1,7 +1,7 @@
 # 最新のパスワードは「c」
-latestHash: 2e7d2c03a9507ae265ecf5b5356885a53393a2029d241394997265a1a25aefc6
+salt: c9f775df
+latestHash: 022e6202d029444c53d8d7eb5f42b08bc301c7ba4b18ff78ebaf87e5afd977c8
 cryptedHistory:
-  - 9d73de203d6358ac8d5e0b0eea729e0f
-  - 2da1ad07fa67ea0f8c0891b3ecac354b
+  - 1430d096c2da98d93ec640d2997797b5
+  - 0697efbe3eb066ff12668a9eb7363ed8
 isAutoOpenFolder: true
-
